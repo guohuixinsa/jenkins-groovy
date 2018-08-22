@@ -1,0 +1,343 @@
+import groovy.grape.Grape
+@Grab(group='org.codehaus.groovy.modules.http-builder', module='http-builder', version='0.5.2')
+import groovyx.net.http.HTTPBuilder
+import groovyx.net.http.Method
+import hudson.model.*
+import hudson.EnvVars
+import hudson.model.Environment
+import groovy.io.FileType
+import java.io.File
+import hudson.FilePath
+import groovy.xml.MarkupBuilder
+import groovyx.net.http.HttpResponseException
+
+System.setProperty("https.protocols", "TLSv1,TLSv1.1,TLSv1.2");
+
+def getEnvPR(Build,varkey ){
+    pr= Build.getEnvVars().get(varkey )
+    println pr
+    if(pr== "null" ){result= 0 }else{result = pr.toInteger() }
+    println pr
+    return result
+}
+
+def getCommitsByPR(repath,prId){
+    def remote = new HTTPBuilder("https://stash1.harman.com")
+    System.setProperty("https.protocols", "TLSv1.1");
+    def issueJson = remote.request(Method.GET) { req ->
+              uri.path = repath + "/" + prId + "/" + "commits"
+              println  uri.path
+              headers.'Authorization' ="Basic ${"huguo:Hello09!".bytes.encodeBase64().toString()}"
+              response.success = { resp, json ->
+                       json ?: [:]
+                       println json.values.getClass().getName()
+                       return json.values
+                       }
+              }
+}
+
+def getDetailsPR(repath,prId){
+    def remote = new HTTPBuilder("https://stash1.harman.com")
+    System.setProperty("https.protocols", "TLSv1.1");
+    def result = null 
+    try{
+           def issueJson = remote.request(Method.GET) { req ->
+            uri.path = repath + "/" + prId
+            println uri.path
+            headers.'Authorization' ="Basic ${"huguo:Hello09!".bytes.encodeBase64().toString()}"
+            response.success = { resp, json ->
+                    json ?: [:]
+                    if(json.state == "MERGED" ){ result = json }else{result="null"}
+             }
+             }
+            }catch(HttpResponseException e) {
+                result = "null"
+            }
+      return result
+     }
+
+def getChangeList(item){
+    project = item.split(/\//)[0].replaceAll("\\s","")
+    repo = item.split(/\//)[1].replaceAll("\\s","")
+    var = project.trim() + "_" + repo.trim() +"_" + "pr"
+    EndBuildPR = getEnvPR(build,var)
+    StartBuildPR  = EndBuildPR 
+    PreSucBuild = build.getPreviousSuccessfulBuild()
+    if (PreSucBuild  != null ){
+    StartBuildPR  = getEnvPR(PreSucBuild ,var)
+     }
+    println "var : $var ; EndBuildPR :${EndBuildPR },StartBuildPR :${StartBuildPR  }  "
+    
+    result = [:]
+    repath = "/rest/api/1.0/projects/${project}/repos/${repo}/pull-requests"
+    if( EndBuildPR != 0 ){
+         range = EndBuildPR - StartBuildPR  + 2
+         println "help!!!!!" 
+         def prmessage =  [:]
+         def prcommit = [:]
+         if( EndBuildPR  ==1 ){range = 1}
+         for(pr =0  ;pr<range ; pr++){
+               prId = EndBuildPR - pr
+               println prId 
+               prmessage[prId ] = getDetailsPR(repath.trim() ,prId)
+               if (prmessage[prId ]  == "null" ){ continue }
+               prcommit[prId ] = getCommitsByPR(repath.trim() ,prId)
+               }
+         result["COMMIT"] = prcommit
+         result["PR"] = prmessage
+         }
+         if(result.size()>0){
+               def keys = result.keySet() as List
+                 println keys
+               }
+         println result
+         return result
+}
+
+def  repolist= build.getEnvVars().get('repolist')
+getReleaseNotes(repolist)
+
+def getReleaseNotes(repolist)
+{
+if(build.workspace.isRemote())
+{
+    channel = build.workspace.channel;
+    fp = new FilePath(channel, build.workspace.toString() + "/releaseNotes.html")
+} else {
+    fp = new FilePath(new File(build.workspace.toString() + "/releaseNotes.html"))
+}
+
+if(fp != null)
+{ StringWriter writer = new StringWriter()
+def build = new MarkupBuilder(writer)
+build.html{
+  head{
+    style(type:"text/css", '''
+li>p {
+    padding: 0;
+    margin: 0;
+}
+p {
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+*, ::after, ::before {
+    -webkit-box-sizing: inherit;
+    box-sizing: inherit;
+}
+user agent stylesheet
+p {
+    display: block;
+    -webkit-margin-before: 1em;
+    -webkit-margin-after: 1em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+}
+user agent stylesheet
+li {
+    display: list-item;
+    text-align: -webkit-match-parent;
+}
+user agent stylesheet
+ul, menu, dir {
+    display: block;
+    list-style-type: disc;
+    -webkit-margin-before: 1em;
+    -webkit-margin-after: 1em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+    -webkit-padding-start: 40px;
+}
+body {
+    font-family: 'lato', Roboto, 'Open Sans', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0;
+    background-color: #fff;
+}
+body {
+    font-family: -apple-system,system-ui,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #292b2c;
+    background-color: #fff;
+}
+.h4, h4 {
+    font-size: 1.5rem;
+}
+.h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
+    margin-bottom: .5rem;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: inherit;
+}
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 0;
+    margin-bottom: .5rem;
+}
+
+*, ::after, ::before {
+    -webkit-box-sizing: inherit;
+    box-sizing: inherit;
+}
+user agent stylesheet
+h4 {
+    display: block;
+    -webkit-margin-before: 1.33em;
+    -webkit-margin-after: 1.33em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+    font-weight: bold;
+}
+.anchorjs-link {
+    padding: 0.4em 1em 0.4em 0.5em !important;
+}
+.anchorjs-link {
+    opacity: 0;
+    -webkit-font-smoothing: antialiased;
+    text-decoration: none;
+}
+a {
+    color: #069;
+}
+[role=button], a, area, button, input, label, select, summary, textarea {
+    -ms-touch-action: manipulation;
+    touch-action: manipulation;
+}
+a {
+    color: #0275d8;
+    text-decoration: none;
+}
+a {
+    background-color: transparent;
+    -webkit-text-decoration-skip: objects;
+}
+*, ::after, ::before {
+    -webkit-box-sizing: inherit;
+    box-sizing: inherit;
+}
+a:-webkit-any-link {
+    color: -webkit-link;
+    cursor: pointer;
+    text-decoration: underline;
+}
+.h5, h5 {
+    font-size: 1.25rem;
+}
+.h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
+    margin-bottom: .5rem;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: inherit;
+}
+
+h5 {
+    display: block;
+    font-size: 0.83em;
+    -webkit-margin-before: 1.67em;
+    -webkit-margin-after: 1.67em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+    font-weight: bold;
+}
+    ''')
+  }
+  body{
+    h1"Release Notes"
+    h2"Changes Logs"
+    str = repolist.substring(1, repolist.length() - 1)
+    for (item in str.split(",") ) {
+    div{    
+            project = item.split("/")[0].replaceAll("\\s","")
+            repo =  item.split("/")[1].replaceAll("\\s","")
+            base_url = "https://stash1.harman.com/projects" + "/" + project.trim()+ "/" +"repos"+ "/"+ repo.trim()
+      
+              println item
+              data = getChangeList(item)
+               println data 
+              if (data.size() >0 ){
+               h5{   a('href':base_url,item)}
+               println data.getClass().getName()
+               def keys = data.get("COMMIT").keySet() 
+                println keys[0]
+                println data.get("COMMIT").getClass().getName()
+                commit = data.get("COMMIT")
+                println commit.keySet()
+                prmes = data.get("PR")
+                println "key ${keys[0]} : commit:${commit.get(keys[0])}"
+                println  " get PR ${prmes.get(keys[0])}"
+           for(id in keys  ){
+            ul{     
+                    println id
+                    println "PR : ${prmes.get(id)}"
+                     li{ 
+                         p{
+                                  pr_url = base_url  + "/" + id + "/" +"pull-requests"+"/"+ "overview"
+                                 println "${pr_url}"
+                                  a('href':"${pr_url}","PR-${id}：")
+                                  a("${prmes.get(id).get('title')}")
+                            }
+                       }
+                   commit_url =  base_url  + "/"+ id + "/" +"pull-requests"+"/"+ "commits"
+               //  h6{a("href":"${commit_url}" ,"PR-${id} : COMMITS AS BELOW")}
+             ul{
+            for(com in  commit.get(id)){
+                   li{
+                     p{       
+                                  a("href":"${com.get('id')}","${com.get('displayId')}")
+                                  a(";")
+                                  a(com.get('committer').get('displayName'))
+                                  a(";")
+                                  a(com.get('message'))
+
+                            }
+                     }
+                            
+           }
+    }
+                   }
+      }
+               }
+
+         }
+   }
+     a("Stash")
+    ul{
+      li{ 
+          p{
+            a('href':'http://10.80.105.178:8080',"hellop")
+           }
+       }
+ li{ 
+          p{
+            a("helloq")
+           }
+       }
+ li{ 
+          p{
+            a("hellos")
+           }
+       }
+       }
+
+    table{
+      tr{
+        td('class':'bigPaddingAndGreen', "Our very own moose:")
+        td('class':'bigPaddingAndGreen'){
+          img(src:"", border:0)
+        }
+      }
+    }
+  }
+}
+println writer.toString()
+    
+    fp.write(writer.toString(), null); //writing to file
+} 
+
+
+ 
+}
