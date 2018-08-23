@@ -1,0 +1,14 @@
+def job = Hudson.instance.getJob("test_Android_CI_Build_T")
+println job
+numbuilds = job.builds.size()
+println numbuilds
+build = job.builds[15]
+println build
+changesetlist = build.getChangeSet()
+println changesetlist
+changesetlist.each{log ->
+println log
+println log.getClass().getName() 
+  
+}
+

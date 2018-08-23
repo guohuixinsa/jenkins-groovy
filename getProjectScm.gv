@@ -1,0 +1,13 @@
+def projects = hudson.model.Hudson.instance
+projects.getItems(hudson.model.Project).each {
+    proj -> 
+      if (proj.getScm().type == "hudson.plugins.repo.RepoScm" )  {
+         scm = proj.getScm()
+         println scm.getClass().getName()
+         println scm.getRepoUrl()
+         println scm.getLocalManifest()
+         def ss= scm.createChangeLogParser() 
+       println("Project: " + proj.displayName + " SCM: " + proj.getScm().type);
+      }
+  return 0
+}
