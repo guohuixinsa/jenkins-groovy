@@ -22,12 +22,12 @@ def getEnvPR(Build,varkey ){
 }
 
 def getCommitsByPR(repath,prId){
-    def remote = new HTTPBuilder("https://stash1.harman.com")
+    def remote = new HTTPBuilder("https://stashurl.com")
     System.setProperty("https.protocols", "TLSv1.1");
     def issueJson = remote.request(Method.GET) { req ->
               uri.path = repath + "/" + prId + "/" + "commits"
               println  uri.path
-              headers.'Authorization' ="Basic ${"huguo:Hello09!".bytes.encodeBase64().toString()}"
+              headers.'Authorization' ="Basic ${"username:password".bytes.encodeBase64().toString()}"
               response.success = { resp, json ->
                        json ?: [:]
                        println json.values.getClass().getName()
@@ -37,14 +37,14 @@ def getCommitsByPR(repath,prId){
 }
 
 def getDetailsPR(repath,prId){
-    def remote = new HTTPBuilder("https://stash1.harman.com")
+    def remote = new HTTPBuilder("https://stashurl.com")
     System.setProperty("https.protocols", "TLSv1.1");
     def result = null 
     try{
            def issueJson = remote.request(Method.GET) { req ->
             uri.path = repath + "/" + prId
             println uri.path
-            headers.'Authorization' ="Basic ${"huguo:Hello09!".bytes.encodeBase64().toString()}"
+            headers.'Authorization' ="Basic ${"username:pasword".bytes.encodeBase64().toString()}"
             response.success = { resp, json ->
                     json ?: [:]
                     if(json.state == "MERGED" ){ result = json }else{result="null"}
@@ -308,7 +308,7 @@ h5 {
     ul{
       li{ 
           p{
-            a('href':'http://10.80.105.178:8080',"hellop")
+            a('href':'http://localhost:8080',"hellop")
            }
        }
  li{ 
