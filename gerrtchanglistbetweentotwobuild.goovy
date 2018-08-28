@@ -1,0 +1,263 @@
+@Grab('org.codehaus.groovy.modules.http-builder:http-builder:0.7.1')
+
+import groovyx.net.http.RESTClient
+import static groovyx.net.http.Method.*
+import static groovyx.net.http.ContentType.*
+import groovy.json.JsonSlurper
+import groovyx.net.http.HTTPBuilder
+import hudson.model.Environment
+import groovy.io.FileType
+import java.io.File
+import hudson.FilePath
+import groovy.xml.MarkupBuilder
+import java.text.SimpleDateFormat
+
+System.setProperty("http.proxyHost", "ip);
+System.setProperty("http.proxyPort", "fd");
+System.setProperty("https.protocols", "TLSv1,TLSv1.1,TLSv1.2");
+
+job_name = build.buildVariableResolver.resolve('JOB_NAME')
+Start_BuildNum = build.buildVariableResolver.resolve('Start_BuildNum').toInteger()
+End_BuildNum = build.buildVariableResolver.resolve('End_BuildNum').toInteger()
+def job = Hudson.instance.getJob(job_name)
+numbuilds = job.builds.size()
+start_build = job.builds[numbuilds -Start_BuildNum]
+println "${start_build.result} && ${end_build.result}"
+if( Start_BuildNum >= End_BuildNum  ){
+    println "start build equal with end build ,there is no new changes"
+    return 1
+}
+
+coutBuild = End_BuildNum - Start_BuildNum 
+for (i = 0;i<coutBuild ;i++){
+   Builds << start_build 
+   changeItems = build.changeSet.items
+   count += changeItems.length
+   changeSet += changeItems as List
+   start_build  = job.builds[Start_BuildNum +coutBuild]
+}
+
+
+def getGerritMesByCommit(commit){
+  def remote = new HTTPBuilder("https://gerriturl.com")
+  def result = [:]
+  def issueJson = remote.request(GET,TEXT) { req ->
+      uri.path = "/a/changes/"
+      uri.query = [q: "commit:${commit}"]
+      headers.'Authorization' ="Basic ${"username:httppassword".bytes.encodeBase64().toString()}"
+      response.success = { resp,json ->
+          def fixedJson = json.text.replaceAll('\\)]}\'', '').trim() // remove magic prefix
+          //println fixedJson
+          def jsonSlurper = new JsonSlurper()
+          json =  jsonSlurper.parseText(fixedJson) // parse the fixed json body and return
+          if(json.size != 0){
+            result["id"] = json[0].get("_number")
+            result["subject"] = getCommitMsg(json[0].get("_number") , commit)
+            result["submitted"] = json[0].get("submitted")
+            return result 
+          } else{ return }
+          }
+       }
+    }
+
+def getCommitMsg(changeId , commitId){
+  def remote = new HTTPBuilder("https://gerriturl.com")
+  def result = [:]
+  def issueJson = remote.request(GET,TEXT) { req ->
+    uri.path = "/a/changes/${changeId}/revisions/${commitId}/commit"
+    //  uri.query = [q: "commit:${commit}"]
+      headers.'Authorization' ="Basic ${"username:httppassword".bytes.encodeBase64().toString()}"
+      response.success = { resp,json ->
+          def fixedJson = json.text.replaceAll('\\)]}\'', '').trim() // remove magic prefix
+          //println fixedJson
+          def jsonSlurper = new JsonSlurper()
+          json =  jsonSlurper.parseText(fixedJson) // parse the fixed json body and return
+          return json["message"]
+      }
+  }
+  
+}
+
+getReleaseNotes()
+
+def getReleaseNotes(){
+    def job = Hudson.instance.getJob(JOB_NAME)
+    numbuilds = job.builds.size()
+    println numbuilds
+    build = job.builds[0]
+    if(build.workspace.isRemote())
+    {
+        channel = build.workspace.channel;
+        fp = new FilePath(channel, build.workspace.toString() + "/releaseNotes.html")
+    } else {
+        fp = new FilePath(new File(build.workspace.toString() + "/releaseNotes.html"))
+    }
+    if(fp != null){
+        StringWriter writer = new StringWriter()
+        def Build = new MarkupBuilder(writer)
+   Build.html{
+          head{
+                 style(type:"text/css", '''
+          li>p {
+              padding: 0;
+              margin: 0;
+             }
+        p {
+            margin-top: 0;
+            margin-bottom: 1rem;
+            }
+
+       p {
+            display: block;
+           -webkit-margin-before: 1em;
+           -webkit-margin-after: 1em;
+           -webkit-margin-start: 0px;
+           -webkit-margin-end: 0px;
+          }
+       li {
+            display: list-item;
+            text-align: -webkit-match-parent;
+           }
+      ul, menu, dir {
+           display: block;
+           list-style-type: disc;
+           -webkit-margin-before: 1em;
+           -webkit-margin-after: 1em;
+           -webkit-margin-start: 0px;
+           -webkit-margin-end: 0px;
+           -webkit-padding-start: 40px;
+            }
+      body {
+          font-family: 'lato', Roboto, 'Open Sans', sans-serif;
+          font-size: 14px;
+          line-height: 1.5;
+          margin: 0;
+          background-color: #fff;
+          }
+       body {
+         font-family: -apple-system,system-ui,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+           font-size: 1rem;
+           font-weight: 400;
+           line-height: 1.5;
+          color: #292b2c;
+          background-color: #fff;
+         }
+.h4, h4 {
+    font-size: 1.5rem;
+}
+.h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
+    margin-bottom: .5rem;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: inherit;
+}
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 0;
+    margin-bottom: .5rem;
+}
+
+h4 {
+    display: block;
+    -webkit-margin-before: 1.33em;
+    -webkit-margin-after: 1.33em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+    font-weight: bold;
+}
+a {
+    color: #069;
+}
+
+a {
+    color: #0275d8;
+    text-decoration: none;
+}
+a {
+    background-color: transparent;
+    -webkit-text-decoration-skip: objects;
+}
+.h5, h5 {
+    font-size: 1.25rem;
+}
+.h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
+    margin-bottom: .5rem;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: inherit;
+}
+
+h5 {
+    display: block;
+    font-size: 0.83em;
+    -webkit-margin-before: 1.67em;
+    -webkit-margin-after: 1.67em;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+    font-weight: bold;
+}
+pre {
+white-space: pre-wrap;
+white-space: -moz-pre-wrap;
+white-space: -pre-wrap;
+white-space: -o-pre-wrap;
+*word-wrap: break-word;
+*white-space : normal ;  
+}
+    ''')
+  }
+        body{
+             h1"Release Notes"
+             h2"Changes Logs"
+             changesetlist = changeSet
+             if(changesetlist.size() == 0){  p "no new changes"  ;return}
+             def prerepo = currepo = null
+             changesetlist.each{log -> 
+                   div{    
+                           currepo= log.getServerPath()
+                           url_repo = "https://gerriturl.com/#/q/project:" + currepo
+                           if( currepo != prerepo ){ h4{   a('href':url_repo ,currepo) } }
+                           prerepo  = currepo
+                           ul{     
+                                 li{ 
+                                      p{     
+                                          def commitId  = log.getRevision()
+                                          println commitId
+                                          def gerritMsg = getGerritMesByCommit(commitId) 
+                                          println gerritMsg
+                                           def changeid = change_url = "https://gerriturl.com/gitweb"
+                                           def subject = log.getMsg() 
+                                           def submitted = log.getCommitterDate()
+                                           def mergeType = "SUBMIT DIRECTLY"
+                                          if(gerritMsg != null){
+                                            changeid = gerritMsg.get("id")
+                                            date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").parse(gerritMsg.get("submitted"))
+                                            submitted = new SimpleDateFormat("EEE,dd MMM yyyy HH:mm:ss Z").format(date) 
+                                            change_url = "https://androidhub.harman.com" + "/#/c/" + changeid 
+                                            mergeType = "GERRIT-" + changeid + ":"
+                                            subject = gerritMsg.get("subject")
+                                          }
+                                         a('href':change_url ,mergeType)
+                                         a("("+"${submitted}"+")")
+                                          a(commitId .take(8))
+                                         def author = log.getAuthorName()
+                                         a(";${author};")
+                                         pre(subject)
+                                          }
+                                    }
+
+                             } 
+      }
+               }
+
+         }
+   }
+    
+
+    fp.write(writer.toString(), null); //writing to file
+} 
+
+
+ 
+}
