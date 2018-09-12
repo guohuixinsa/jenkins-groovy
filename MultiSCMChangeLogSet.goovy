@@ -1,0 +1,20 @@
+def job = Hudson.instance.getJob('V3_DailyBuild')
+build = job.getBuildByNumber(19)
+
+changeset = build.changeSet
+if( changeset instanceof org.jenkinsci.plugins.multiplescms.MultiSCMChangeLogSet){
+  build.changeSet.getChangeLogSetWrappers().each{ change ->
+    path = change.getName()
+    println path
+    change.getLogs().each{ log ->
+    if (log instanceof hudson.plugins.git.GitChangeSet){
+        currenrepo = path
+      }else
+    if(log instanceof hudson.plugins.repo.ChangeLogEntry){
+        currenrepo = log.getServerPath()
+      }
+    }
+    
+  }
+}
+
