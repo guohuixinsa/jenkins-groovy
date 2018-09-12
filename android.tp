@@ -1,0 +1,333 @@
+<STYLE>
+BODY, TABLE,TD,TH, P {
+  font-family:Verdana,Helvetica,sans serif;
+  font-size:18px;
+  color:black;
+  border-collapse:collapse;
+}
+A ,pre{line-height: normal;}
+h1 { color:black; }
+h2 { color:black; }
+h3 { color:black; }
+TD.bg1 { color:black; background-color:#0000C0; font-size:100% }
+TD.bg2 { color:black; background-color:#EAF2D3; font-size:100% }
+TD.bg3 { color:black; background-color:white;  width: 30px;border-collapse:collapse;border:3px solid #98bf21; }
+TR.bg4 { color:#000000; background-color:white;font-size:20px;border-collapse:collapse;border:3px solid #98bf21;}
+TD.bg4 { style="word-wrap: break-word;word-break:break-all;" width="200"  color:#000000; background-color:white;border-collapse:collapse;border:3px solid #98bf21}
+TD.test_passed { color:blue; }
+TD.test_failed { color:red; }
+TD.console { font-family:Courier New; }
+</STYLE>
+<BODY>
+
+<%
+@Grab('org.codehaus.groovy.modules.http-builder:http-builder:0.7.1')
+
+import org.apache.commons.net.ftp.FTPClient
+import groovyx.net.http.RESTClient
+import static groovyx.net.http.Method.*
+import static groovyx.net.http.ContentType.*
+import groovy.json.JsonSlurper
+import groovyx.net.http.HTTPBuilder
+import hudson.model.Environment
+import groovy.io.FileType
+import java.io.File
+import hudson.FilePath
+import groovy.xml.MarkupBuilder
+import java.text.SimpleDateFormat
+import  hudson.*
+import hudson.model.* 
+
+
+def getChangeList(){
+   def lastSuccesfulBuild = build.previousNotFailedBuild
+   def failed = build.result != hudson.model.Result.SUCCESS
+   def currResult = build.result
+   def prevResult = build.previousBuild?.result ?: null
+   def consecutiveSuccess = currResult == hudson.model.Result.SUCCESS && prevResult == hudson.model.Result.SUCCESS
+   def builds = []
+   def changeSet = []
+   def count = 0 
+   if(consecutiveSuccess){
+       builds << build
+       def changeItems = build.changeSet.items
+       count += changeItems.length
+       changeSet += changeItems as List
+       }else{
+           while(lastSuccesfulBuild){
+           builds << lastSuccesfulBuild
+           def changeItems = lastSuccesfulBuild.changeSet.items
+           count += changeItems.length
+           changeSet += changeItems as List
+           lastSuccesfulBuild = lastSuccesfulBuild.nextBuild
+           }   
+       }
+     return changeSet  
+     }
+
+def getGerritMesByCommit(commit){
+  def remote = new HTTPBuilder("https://android.com")
+  def result = [:]
+  def issueJson = remote.request(GET,TEXT) { req ->
+      uri.path = "/a/changes/"
+      uri.query = [q: "commit:${commit}"]
+      headers.'Authorization' ="Basic ${"username:password".bytes.encodeBase64().toString()}"
+      response.success = { resp,json ->
+          def fixedJson = json.text.replaceAll('\\)]}\'', '').trim() // remove magic prefix
+          //println fixedJson
+          def jsonSlurper = new JsonSlurper()
+          json =  jsonSlurper.parseText(fixedJson) // parse the fixed json body and return
+          if(json.size != 0){
+            result["id"] = json[0].get("_number")
+            result["subject"] = getCommitMsg(json[0].get("_number") , commit)
+            result["submitted"] = json[0].get("submitted")
+            return result 
+          } else{ return }
+          }
+       }
+    }
+
+def getCommitMsg(changeId , commitId){
+  def remote = new HTTPBuilder("https://android.com")
+  def result = [:]
+  def issueJson = remote.request(GET,TEXT) { req ->
+    uri.path = "/a/changes/${changeId}/revisions/${commitId}/commit"
+    //  uri.query = [q: "commit:${commit}"]
+      headers.'Authorization' ="Basic ${"username:password".bytes.encodeBase64().toString()}"
+      response.success = { resp,json ->
+          def fixedJson = json.text.replaceAll('\\)]}\'', '').trim() // remove magic prefix
+          //println fixedJson
+          def jsonSlurper = new JsonSlurper()
+          json =  jsonSlurper.parseText(fixedJson) // parse the fixed json body and return
+          return json["message"]
+      }
+  }
+}
+
+def product = build.project.name.split("_")[0]
+FTPClient ftpClient = new FTPClient()
+host = "ip.ip.ip.ip"
+ftpClient.connect(host)
+ftpClient.login("ftpuser", "ftppassword")
+
+def getReleasePath(base_path,ftpClient){
+   //def base_path = "" + "/DailyBuild/" + build.project.name + "_"+ build.getNumber() 
+   def files = ftpClient.listNames(base_path)
+   if(files ==null){println "upload the target file failed"}else{ftpClient.changeWorkingDirectory(base_path)
+   def zipfile
+   for( file in files) {if(file.contains("flashfiles")){ zipfile =  file}}
+   def  zip_path = ftpClient.printWorkingDirectory() + "/" +zipfile 
+   return zip_path
+  }
+}
+
+def getAblReleasePath(base_path,ftpClient){
+   //base_path = "//ABL/"
+    def files = ftpClient.listDirectories(base_path)
+    if(files == "null"){println "upload the target file failed"
+      }else{
+          new_path = base_path  + files[-1].getName()
+          ftpClient.changeWorkingDirectory(new_path)
+          def ablfiles = ftpClient.listNames(new_path)
+          def zipfile
+          for( file in ablfiles) { if(file.contains("bin")){ zipfile =  file}}
+          def  zip_path = ftpClient.printWorkingDirectory()+"/" +zipfile 
+          return zip_path
+}}
+
+def flash_path = "" + "/DailyBuild/" + build.project.name + "_"+ build.getNumber()
+def abl_path = "//ABL/"
+def flashfiles_path = "ftp://" + host + getReleasePath(flash_path,ftpClient)
+def ablbin_path = "ftp://" + host + getAblReleasePath(abl_path,ftpClient)
+
+ftpClient.logout()
+ftpClient.disconnect()
+
+
+//def tag_name = flashfiles_path.split("_")[-1].replace(".zip","")
+
+
+
+Calendar strDate = build.getTimestamp() 
+def date = strDate.get(Calendar.DAY_OF_MONTH) 
+def month = strDate.get(Calendar.MONTH) +1
+def year = strDate.get(Calendar.YEAR) %10
+def buildnum = build.getNumber() 
+def node = build.getBuiltOn().getNodeName()
+
+%>
+
+
+<TABLE style="width: 100%";>
+  <TR><TD align="right"><IMG SRC="${rooturl}static/e59dfe28/images/32x32/<%= build.result.toString() == 'SUCCESS' ? "blue.gif" : build.result.toString() == 'FAILURE' ? 'red.gif' : 'yellow.gif' %>" />
+  </TD><TD  valign="center"><B style="font-size: 200%;">BUILD  ${build.result}</B></TD></TR>
+  <TR><TD class="bg2"  colspan="2"><B>SUMMARY</B></TD></TR>
+  <TR class="bg4"  ><TD  class="bg3" valign="left" >Product:</TD><TD class="bg4" >${product}</TD></TR>
+  <TR class="bg4" ><TD  class="bg3" valign="left" >Job:</TD><TD class="bg4" ><A href="${rooturl}${build.url}">${project.name}#${build.number}</A></TD></TR>
+  <TR class="bg4" ><TD  class="bg3" valign="left" >Trigger:</TD><TD class="bg4" >${it.timestampString}</TD></TR>
+  <TR class="bg4" ><TD  class="bg3" valign="left" >Duration:</TD><TD class="bg4" >${build.durationString}</TD></TR>
+  <TR class="bg4" ><TD  class="bg3" valign="left" >Node:</TD><TD class="bg4" >${node}</TD></TR>
+  <TR class="bg4" ><TD  class="bg3" valign="left" >SCM:</TD><TD class="bg4" ><% build.causes.each() { cause -> %> ${cause.shortDescription} <%  } %></TD></TR>
+<!--  <TR class="bg4" ><TD  class="bg4" valign="left" >ABL:</TD><TD class="bg4" ><A href=${ablbin_path}>${ablbin_path}</A></TD></TR> -->
+
+
+<%if(build.result==hudson.model.Result.SUCCESS) {
+ 
+%>
+<TR class="bg4"  ><TD  class="bg4" valign="left" >Tag:</TD><TD class="bg4" >${build.getEnvironment().get("BuildTag")}</TD></TR>
+<TR class="bg4" ><TD  class="bg4" valign="left" >ABL:</TD><TD class="bg4" ><A href=${ablbin_path}>${ablbin_path}</A></TD></TR>
+<TR class="bg4"  ><TD class="bg4" valign="left"  >Flash:</TD>
+<TD class="bg4" ><a href=${flashfiles_path}>${flashfiles_path}</a></TD>
+</TR>
+<%  } %>
+
+</TABLE>
+<BR/>
+
+
+<!-- CHANGE SET --> 
+ <TABLE width="100%" cellpadding="0" cellspacing="0">
+ <TR><TD class="bg2"  colspan="2"><B>CHANGES</B></TD></TR>
+<% 
+   changesetlist  = getChangeList()
+  if(changesetlist != null){
+  def hadChanges = false %>
+<%
+  def prerepo = currepo = null
+  changesetlist.each{ log ->
+     hadChanges = true
+     if(log instanceof hudson.plugins.repo.ChangeLogEntry){
+     currepo= log.getServerPath()
+     url_repo = "https://android.com/#/q/project:" + currepo
+     }
+     if( currepo != prerepo ){  %>
+      <TR><TD><h4><a href=${url_repo}>${currepo}</a></h4>
+  <%
+      prerepo  = currepo
+      def commitId  = log.getRevision()
+      def gerritMsg = getGerritMesByCommit(commitId) 
+      def changeid = change_url = "https://androidcom/gitweb"
+      def subject = log.getMsg() 
+      def submitted = log.getCommitterDate()
+      def mergeType = "SUBMIT DIRECTLY"
+      def author = log.getAuthorName()
+      def commitShow = ""
+      if(commitId != null){commitShow = commitId.take(8)}
+
+      if(gerritMsg != null){
+          changeid = gerritMsg.get("id")
+          date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").parse(gerritMsg.get("submitted"))
+          submitted = new SimpleDateFormat("EEE,dd MMM yyyy HH:mm:ss Z").format(date) 
+          change_url = "https://android.com" + "/#/c/" + changeid 
+          mergeType = "GERRIT-" + changeid + ":"
+          subject = gerritMsg.get("subject")
+          }
+    %>    <ur><li><p>
+          <a href="${change_url}">${mergeType}</a>
+          <a>(${submitted})</a>
+          <a>${commitShow};</a>
+          <a>author:${author}</a>
+          <pre>${subject}</pre>
+          </p></li></ur></TD> </TR>
+<%  } }
+        if(!hadChanges) { %>
+        <TR><TD colspan="2">No Changes</TD></TR>
+       <%      } } %>
+</TABLE>
+<BR/>
+
+
+<!-- ARTIFACTS -->
+<% def artifacts = build.artifacts
+if(artifacts != null && artifacts.size() > 0) { %>
+  <TABLE width="100%">
+    <TR><TD class="bg1"><B>BUILD ARTIFACTS</B></TD></TR>
+    <TR>
+      <TD>
+<% 		artifacts.each() { f -> %>		
+      	  <li>
+      	    <a href="${rooturl}${build.url}artifact/${f}">${f}</a>
+      	  </li>
+<%		} %>
+      </TD>
+    </TR>
+  </TABLE>
+<BR/>  
+<% } %>
+
+<!-- MAVEN ARTIFACTS -->
+<% 
+try {
+  def mbuilds = build.moduleBuilds
+  if(mbuilds != null) { %>
+  <TABLE width="100%">
+      <TR><TD class="bg1"><B>BUILD ARTIFACTS</B></TD></TR>
+<% 
+    try {  
+        mbuilds.each() { m -> %>	  
+        <TR><TD class="bg2"><B>${m.key.displayName}</B></TD></TR>
+<%		m.value.each() { mvnbld ->
+			def artifactz = mvnbld.artifacts
+			if(artifactz != null && artifactz.size() > 0) { %>			
+      <TR>
+        <TD>
+<%				artifactz.each() { f -> %>			
+      	    <li>
+      	      <a href="${rooturl}${mvnbld.url}artifact/${f}">${f}</a>
+      	    </li>
+<%				} %>		
+      	</TD>
+      </TR>
+<%			} 
+		}
+       }
+    } catch(e) {
+	// we don't do anything
+    }  %>      
+  </TABLE>
+<BR/>
+<% } 
+
+}catch(e) {
+	// we don't do anything
+}
+%>
+
+<!-- JUnit TEMPLATE -->
+
+<% def junitResultList = it.JUnitTestResult
+try {
+ def cucumberTestResultAction = it.getAction("org.jenkinsci.plugins.cucumber.jsontestsupport.CucumberTestResultAction")
+ junitResultList.add(cucumberTestResultAction.getResult())
+} catch(e) {
+        //cucumberTestResultAction not exist in this build
+}
+if (junitResultList.size() > 0) { %>
+ <% junitResultList.each{
+  junitResult ->  %>
+  <TABLE width="100%">
+    <TR><TD colspan="2" class="bg2" ><B>${junitResult.description}</B></TD></TR>
+     <% junitResult.getChildren().each { packageResult -> %>
+        <TR><TD class="bg2" colspan="2"> Name: ${packageResult.getName()} Failed: ${packageResult.getFailCount()} test(s), Passed: ${packageResult.getPassCount()} test(s), Skipped: ${packageResult.getSkipCount()} test(s), Total: ${packageResult.getPassCount()+packageResult.getFailCount()+packageResult.getSkipCount()} test(s)</TD></TR>
+        <% packageResult.getFailedTests().each{ failed_test -> %>
+          <TR bgcolor="white"><TD class="test_failed" colspan="2"><B><li>Failed: ${failed_test.getFullName()} </li></B></TD></TR>
+        <% }
+      } %>
+  </TABLE>
+  <BR/>
+<%
+ }
+} %>
+
+<!-- CONSOLE OUTPUT -->
+<% if(build.result==hudson.model.Result.FAILURE) { %>
+<TABLE width="100%" cellpadding="0" cellspacing="0">
+<TR><TD class="bg2" ><B>CONSOLE OUTPUT</B></TD></TR>
+<% 	build.getLog(100).each() { line -> %>
+	<TR><TD class="console">${org.apache.commons.lang.StringEscapeUtils.escapeHtml(line)}</TD></TR>
+<% 	} %>
+</TABLE>
+<BR/>
+<% } %>
+
+</BODY>
