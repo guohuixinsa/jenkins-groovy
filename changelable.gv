@@ -1,0 +1,19 @@
+import jenkins.model.*
+import hudson.model.*
+import hudson.slaves.*
+slave = hudson.slaves.DumbSlave
+
+s181 = Jenkins.instance.getNode("10.80.105.183")
+
+for(project in Hudson.instance.items) {
+  name = project.name
+  node = project.getLastBuiltOn()
+  
+  if( node == s181){//println node;
+                    println name
+      def slaveLabel = new hudson.model.labels.LabelAtom("GWMV2");
+                    project.setAssignedLabel(slaveLabel)
+                   }
+
+}
+
